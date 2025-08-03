@@ -1,3 +1,7 @@
 uvicorn
 fastapi
 pydantic
+langchain-huggingface
+langchain-chroma
+langchain-text-splitters
+sentence_transformers
