@@ -1,5 +1,4 @@
 import asyncio
-from functools import cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_chroma import Chroma
@@ -7,6 +6,9 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from retriever.embedder import get_embedder
+
+_vector_store_instance = None
+_vector_store_config = None
 
 
 class AsyncVectorStore:
@@ -35,7 +37,7 @@ class AsyncVectorStore:
         )
 
     async def add_documents(self, documents: List[Document]) -> None:
-        await self.add_documents_true_streaming(documents)
+        await self.add_documents_stream(documents)
 
     async def add_documents_stream(self, documents: List[Document]) -> None:
         chunk_queue = asyncio.Queue(maxsize=100)
@@ -80,7 +82,7 @@ class AsyncVectorStore:
 
         await chunk_queue.put(None)
 
-    async def search(
+    def search(
         self,
         query: str,
         top_k: Optional[int] = None,
@@ -98,6 +100,12 @@ class AsyncVectorStore:
         return results
 
 
-@cache
 def get_vector_store(config: dict) -> AsyncVectorStore:
-    return AsyncVectorStore(config)
+    global _vector_store_instance, _vector_store_config
+
+    if _vector_store_instance is not None and _vector_store_config == config:
+        return _vector_store_instance
+
+    _vector_store_instance = AsyncVectorStore(config)
+    _vector_store_config = config
+    return _vector_store_instance
