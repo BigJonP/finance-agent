@@ -1,6 +1,7 @@
 /models/
 /chroma_db/
 /test_chroma_db/
+/data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

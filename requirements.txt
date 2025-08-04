@@ -5,3 +5,5 @@ langchain-huggingface
 langchain-chroma
 langchain-text-splitters
 sentence_transformers
+praw
+python-dotenv
