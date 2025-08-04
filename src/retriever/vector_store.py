@@ -37,7 +37,7 @@ class AsyncVectorStore:
     async def add_documents(self, documents: List[Document]) -> None:
         await self.add_documents_true_streaming(documents)
 
-    async def add_documents_true_streaming(self, documents: List[Document]) -> None:
+    async def add_documents_stream(self, documents: List[Document]) -> None:
         chunk_queue = asyncio.Queue(maxsize=100)
 
         consumer_task = asyncio.create_task(self._chunk_consumer(chunk_queue))
