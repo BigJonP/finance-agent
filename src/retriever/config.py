@@ -16,7 +16,6 @@ VECTOR_STORE_CONFIG = {
     "chunk_size": 1000,
     "chunk_overlap": 200,
     "batch_size": 64,
-    "max_workers": 4,
     "top_k": 5,
     "recursive_character_text_splitter": {
         "chunk_size": 1000,

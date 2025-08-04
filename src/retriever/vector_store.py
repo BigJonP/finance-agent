@@ -1,12 +1,12 @@
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, Optional, List, Tuple
+from functools import cache
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.retriever.embedder import get_embedder
+from retriever.embedder import get_embedder
 
 
 class AsyncVectorStore:
@@ -18,47 +18,78 @@ class AsyncVectorStore:
             embedding_function=self.embeddings,
             persist_directory=config.get("persist_directory"),
         )
-        self.executor = ThreadPoolExecutor(max_workers=config.get("max_workers"))
 
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config.get("recursive_character_text_splitter").get("chunk_size"),
-            chunk_overlap=config.get("recursive_character_text_splitter").get("chunk_overlap"),
-            length_function=config.get("recursive_character_text_splitter").get("length_function"),
-            separators=config.get("recursive_character_text_splitter").get("separators"),
+            chunk_size=config.get("recursive_character_text_splitter").get(
+                "chunk_size"
+            ),
+            chunk_overlap=config.get("recursive_character_text_splitter").get(
+                "chunk_overlap"
+            ),
+            length_function=config.get("recursive_character_text_splitter").get(
+                "length_function"
+            ),
+            separators=config.get("recursive_character_text_splitter").get(
+                "separators"
+            ),
         )
 
     async def add_documents(self, documents: List[Document]) -> None:
-        all_chunks = await self.text_splitter.atransform_documents(
-            documents, batch_size=self.config.get("batch_size")
+        await self.add_documents_true_streaming(documents)
+
+    async def add_documents_true_streaming(self, documents: List[Document]) -> None:
+        chunk_queue = asyncio.Queue(maxsize=100)
+
+        consumer_task = asyncio.create_task(self._chunk_consumer(chunk_queue))
+        producer_task = asyncio.create_task(
+            self._chunk_producer(documents, chunk_queue)
         )
 
-        await self._add_chunks_parallel(all_chunks)
+        await asyncio.gather(producer_task, consumer_task)
 
-    async def _add_chunks_parallel(self, chunks: List[Document]) -> None:
-        batches = [
-            chunks[i : i + self.config.get("batch_size")]
-            for i in range(0, len(chunks), self.config.get("batch_size"))
-        ]
+    async def _chunk_consumer(self, chunk_queue: asyncio.Queue) -> None:
+        batch = []
+        batch_size = self.config.get("batch_size")
 
-        tasks = [self._add_batch_async(batch) for batch in batches]
+        while True:
+            chunk = await chunk_queue.get()
+            if chunk is None:
+                break
 
-        await asyncio.gather(*tasks)
+            batch.append(chunk)
+
+            if len(batch) >= batch_size:
+                await self._add_batch_async(batch)
+                batch = []
+
+        if batch:
+            await self._add_batch_async(batch)
 
     async def _add_batch_async(self, documents: List[Document]) -> None:
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(self.executor, self.vector_store.add_documents, documents)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.vector_store.add_documents, documents)
+
+    async def _chunk_producer(
+        self, documents: List[Document], chunk_queue: asyncio.Queue
+    ) -> None:
+        for document in documents:
+            chunks = await self.text_splitter.atransform_documents([document])
+
+            for chunk in chunks:
+                await chunk_queue.put(chunk)
+
+        await chunk_queue.put(None)
 
     async def search(
-        self, query: str, top_k: Optional[int] = None, filter_dict: Optional[Dict[str, Any]] = None
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        filter_dict: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[Document, float]]:
-        loop = asyncio.get_event_loop()
-
         if top_k is None:
             top_k = self.config.get("top_k")
 
-        results = await loop.run_in_executor(
-            self.executor,
-            self.vector_store.similarity_search_with_score,
+        results = self.vector_store.similarity_search_with_score(
             query,
             top_k,
             filter_dict,
@@ -66,9 +97,7 @@ class AsyncVectorStore:
 
         return results
 
-    async def close(self):
-        self.executor.shutdown(wait=True)
 
-
+@cache
 def get_vector_store(config: dict) -> AsyncVectorStore:
     return AsyncVectorStore(config)
