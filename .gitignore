@@ -2,6 +2,7 @@
 /chroma_db/
 /test_chroma_db/
 /data/
+/finance_agent.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
