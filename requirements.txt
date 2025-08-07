@@ -7,3 +7,5 @@ langchain-text-splitters
 sentence_transformers
 praw
 python-dotenv
+supabase
+pydantic[email]
