@@ -14,7 +14,8 @@ async def create_user(user_data: UserCreateRequest):
         existing_user = await manager.get_user_by_email(user_data.email)
         if existing_user:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="User with this email already exists"
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User with this email already exists",
             )
 
         existing_user = await manager.get_user_by_username(user_data.username)
@@ -25,7 +26,9 @@ async def create_user(user_data: UserCreateRequest):
             )
 
         user = await manager.create_user(
-            username=user_data.username, email=user_data.email, password=user_data.password
+            username=user_data.username,
+            email=user_data.email,
+            password=user_data.password,
         )
 
         return UserResponse(
@@ -49,12 +52,12 @@ async def update_user(user_id: str, user_data: UserUpdateRequest):
     try:
         manager = SupabaseManager()
 
-        # Check if user exists
         existing_user = await manager.get_user_by_id(user_id)
         if not existing_user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
-        # Update the user
         updated_user = await manager.update_user(
             user_id=user_id,
             username=user_data.username,
@@ -85,13 +88,16 @@ async def delete_user(user_id: str):
 
         existing_user = await manager.get_user_by_id(user_id)
         if not existing_user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
         success = await manager.delete_user(user_id)
 
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete user"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete user",
             )
 
     except HTTPException:

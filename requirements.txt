@@ -9,3 +9,4 @@ praw
 python-dotenv
 supabase
 pydantic[email]
+openai

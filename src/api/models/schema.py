@@ -3,8 +3,7 @@ from typing import Optional
 
 
 class AdviceRequest(BaseModel):
-    user_id: str
-    prompt: str
+    user_id: int
 
 
 class AdviceResponse(BaseModel):
@@ -28,3 +27,18 @@ class UserUpdateRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
     password: Optional[str] = None
+
+
+class HoldingCreateRequest(BaseModel):
+    user_id: int
+    stock: str
+
+
+class HoldingResponse(BaseModel):
+    user_id: int
+    stock: str
+
+
+class HoldingDeleteRequest(BaseModel):
+    user_id: int
+    stock: str

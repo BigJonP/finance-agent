@@ -6,41 +6,36 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import praw
+from time import sleep
 from dotenv import load_dotenv
 from langchain_core.documents import Document
 
 from retriever.config import VECTOR_STORE_CONFIG
 from retriever.vector_store import get_vector_store
+from scripts.config import REDDIT_PULL_CONFIG
 
 load_dotenv()
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
 class RedditScraper:
-    def __init__(
-        self, client_id: str, client_secret: str, user_agent: str, subreddit_name: str
-    ):
+    def __init__(self, client_id: str, client_secret: str, user_agent: str, subreddit_name: str):
         self.reddit = praw.Reddit(
             client_id=client_id, client_secret=client_secret, user_agent=user_agent
         )
-        self.subreddit_name = subreddit_name
-        self.subreddit = self.reddit.subreddit(self.subreddit_name)
 
-    def get_posts_from_last_hours(self, hours: int = 12) -> List[Dict[str, Any]]:
+    def get_posts_from_last_hours(self, subreddit_name: str, hours: int) -> List[Dict[str, Any]]:
         cutoff_time = datetime.now(UTC) - timedelta(hours=hours)
         cutoff_timestamp = cutoff_time.timestamp()
 
         posts = []
-        logger.info(
-            f"Fetching posts from r/{self.subreddit_name} from the last {hours} hours..."
-        )
+        logger.info(f"Fetching posts from r/{subreddit_name} from the last {hours} hours...")
 
         try:
-            for submission in self.subreddit.new(limit=None):
+            subreddit = self.reddit.subreddit(subreddit_name)
+            for submission in subreddit.new(limit=None):
                 if submission.created_utc >= cutoff_timestamp:
                     post_data = self._extract_post_data(submission)
                     posts.append(post_data)
@@ -64,9 +59,7 @@ class RedditScraper:
             "upvote_ratio": submission.upvote_ratio,
             "num_comments": submission.num_comments,
             "created_utc": submission.created_utc,
-            "created_datetime": datetime.fromtimestamp(
-                submission.created_utc
-            ).isoformat(),
+            "created_datetime": datetime.fromtimestamp(submission.created_utc).isoformat(),
             "url": submission.url,
             "permalink": f"https://reddit.com{submission.permalink}",
             "selftext": submission.selftext,
@@ -74,11 +67,15 @@ class RedditScraper:
         }
 
     def save_posts_to_json(
-        self, posts: List[Dict[str, Any]], filename: Optional[str] = None
+        self,
+        posts: List[Dict[str, Any]],
+        filename: Optional[str] = None,
+        hours: int = 12,
+        subreddit_name: str = "WallStreetBets",
     ) -> str:
         if filename is None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{self.subreddit_name}_posts_{timestamp}.json"
+            filename = f"{subreddit_name}_posts_{timestamp}.json"
 
         output_dir = Path("data/reddit")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -89,10 +86,10 @@ class RedditScraper:
             json.dump(
                 {
                     "metadata": {
-                        "subreddit": self.subreddit_name,
+                        "subreddit": subreddit_name,
                         "scraped_at": datetime.now().isoformat(),
                         "total_posts": len(posts),
-                        "time_window_hours": 12,
+                        "time_window_hours": hours,
                     },
                     "posts": posts,
                 },
@@ -117,7 +114,7 @@ def load_reddit_credentials() -> Dict[str, str]:
     }
 
 
-async def main():
+async def main(subreddit_name: str, hours: int):
     credentials = load_reddit_credentials()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -125,10 +122,10 @@ async def main():
         client_id=credentials["client_id"],
         client_secret=credentials["client_secret"],
         user_agent=credentials["user_agent"],
-        subreddit_name="WallStreetBets",
+        subreddit_name=subreddit_name,
     )
 
-    posts = scraper.get_posts_from_last_hours(hours=12)
+    posts = scraper.get_posts_from_last_hours(hours=hours, subreddit_name=subreddit_name)
 
     vector_store = get_vector_store(VECTOR_STORE_CONFIG)
     documents = [
@@ -141,13 +138,17 @@ async def main():
     await vector_store.add_documents(documents)
 
     if posts:
-        output_file = scraper.save_posts_to_json(posts, filename=f"{timestamp}.json")
+        output_file = scraper.save_posts_to_json(
+            posts, filename=f"{timestamp}.json", subreddit_name=subreddit_name, hours=hours
+        )
         logger.info(f"\nPosts saved to: {output_file}")
     else:
-        logger.info("No posts found in the last 12 hours.")
+        logger.info(f"No posts found in the last {hours} hours.")
 
 
 if __name__ == "__main__":
     import asyncio
 
-    asyncio.run(main())
+    for config in REDDIT_PULL_CONFIG:
+        asyncio.run(main(config["subreddit_name"], config["hours"]))
+        sleep(3)
