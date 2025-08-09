@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, status
 from api.models.schema import UserCreateRequest, UserResponse, UserUpdateRequest
 from db.db_util import SupabaseManager
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/user", tags=["user"])
 
 
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -47,6 +47,31 @@ async def create_user(user_data: UserCreateRequest):
         )
 
 
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(user_id: str):
+    try:
+        manager = SupabaseManager()
+
+        user = await manager.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        return UserResponse(
+            id=user["id"],
+            username=user["username"],
+            email=user["email"],
+            created_at=user["created_at"],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve user: {str(e)}",
+        )
+
+
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(user_id: str, user_data: UserUpdateRequest):
     try:
@@ -54,9 +79,7 @@ async def update_user(user_id: str, user_data: UserUpdateRequest):
 
         existing_user = await manager.get_user_by_id(user_id)
         if not existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         updated_user = await manager.update_user(
             user_id=user_id,
@@ -88,9 +111,7 @@ async def delete_user(user_id: str):
 
         existing_user = await manager.get_user_by_id(user_id)
         if not existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         success = await manager.delete_user(user_id)
 

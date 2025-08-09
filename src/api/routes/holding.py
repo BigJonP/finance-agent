@@ -7,7 +7,7 @@ from api.models.schema import (
 )
 from db.db_util import SupabaseManager
 
-router = APIRouter(prefix="/holdings", tags=["holdings"])
+router = APIRouter(prefix="/holding", tags=["holding"])
 
 
 @router.post("/", response_model=HoldingResponse, status_code=status.HTTP_201_CREATED)
@@ -52,7 +52,7 @@ async def delete_holding(holding_data: HoldingDeleteRequest):
         )
 
 
-@router.get("/{user_id}", response_model=list[HoldingResponse])
+@router.get("/", response_model=list[HoldingResponse])
 async def get_user_holdings(user_id: str):
     try:
         manager = SupabaseManager()
