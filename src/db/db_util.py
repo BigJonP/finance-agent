@@ -172,6 +172,22 @@ class SupabaseManager:
         except Exception as e:
             raise Exception(f"Error deleting holding by user and stock: {str(e)}")
 
+    async def get_stock_metadata(self, stock: str) -> Optional[Dict[str, Any]]:
+        try:
+            response = (
+                self.client.table("stock_metadata")
+                .select("*")
+                .eq("stock", stock)
+                .execute()
+            )
+
+            if response.data:
+                return response.data[0]
+            return None
+
+        except Exception as e:
+            raise Exception(f"Error retrieving stock metadata: {str(e)}")
+
 
 async def create_user(username: str, email: str, password: str) -> Dict[str, Any]:
     manager = SupabaseManager()
@@ -191,3 +207,8 @@ async def create_holding(user_id: int, stock: str) -> Dict[str, Any]:
 async def get_user_holdings(user_id: int) -> List[Dict[str, Any]]:
     manager = SupabaseManager()
     return await manager.get_holdings_by_user(user_id)
+
+
+async def get_stock_metadata(stock: str) -> Optional[Dict[str, Any]]:
+    manager = SupabaseManager()
+    return await manager.get_stock_metadata(stock)
