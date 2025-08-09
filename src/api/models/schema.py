@@ -23,6 +23,11 @@ class UserResponse(BaseModel):
     created_at: str
 
 
+class UserSignInRequest(BaseModel):
+    username: str
+    password: str
+
+
 class UserUpdateRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None

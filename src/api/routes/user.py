@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 
-from api.models.schema import UserCreateRequest, UserResponse, UserUpdateRequest
+from api.models.schema import UserCreateRequest, UserResponse, UserUpdateRequest, UserSignInRequest
 from db.db_util import SupabaseManager
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -44,6 +44,40 @@ async def create_user(user_data: UserCreateRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create user: {str(e)}",
+        )
+
+
+@router.post("/signin", response_model=UserResponse)
+async def sign_in(signin_data: UserSignInRequest):
+    try:
+        manager = SupabaseManager()
+
+        # Get user by username
+        user = await manager.get_user_by_username(signin_data.username)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
+            )
+
+        # Check password (note: this is plain text comparison - should use hashing in production)
+        if user["password"] != signin_data.password:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
+            )
+
+        return UserResponse(
+            id=user["id"],
+            username=user["username"],
+            email=user["email"],
+            created_at=user["created_at"],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sign in: {str(e)}",
         )
 
 
