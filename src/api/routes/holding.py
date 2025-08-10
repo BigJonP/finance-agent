@@ -1,21 +1,24 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 
 from api.models.schema import (
     HoldingCreateRequest,
     HoldingResponse,
     HoldingDeleteRequest,
 )
+from api.auth.jwt_handler import get_current_user
 from db.db_util import SupabaseManager
 
 router = APIRouter(prefix="/holding", tags=["holding"])
 
 
 @router.post("/", response_model=HoldingResponse, status_code=status.HTTP_201_CREATED)
-async def create_holding(holding_data: HoldingCreateRequest):
+async def create_holding(
+    holding_data: HoldingCreateRequest, current_user: dict = Depends(get_current_user)
+):
     try:
         manager = SupabaseManager()
         holding = await manager.create_holding(
-            user_id=holding_data.user_id, stock=holding_data.stock
+            user_id=current_user["user_id"], stock=holding_data.stock
         )
 
         return HoldingResponse(user_id=holding["user_id"], stock=holding["stock"])
@@ -30,11 +33,13 @@ async def create_holding(holding_data: HoldingCreateRequest):
 
 
 @router.delete("/", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_holding(holding_data: HoldingDeleteRequest):
+async def delete_holding(
+    holding_data: HoldingDeleteRequest, current_user: dict = Depends(get_current_user)
+):
     try:
         manager = SupabaseManager()
         success = await manager.delete_holding_by_user_and_stock(
-            user_id=holding_data.user_id, stock=holding_data.stock
+            user_id=current_user["user_id"], stock=holding_data.stock
         )
 
         if not success:
@@ -53,10 +58,10 @@ async def delete_holding(holding_data: HoldingDeleteRequest):
 
 
 @router.get("/", response_model=list[HoldingResponse])
-async def get_user_holdings(user_id: str):
+async def get_user_holdings(current_user: dict = Depends(get_current_user)):
     try:
         manager = SupabaseManager()
-        holdings = await manager.get_holdings_by_user(user_id)
+        holdings = await manager.get_holdings_by_user(current_user["user_id"])
 
         return [
             HoldingResponse(user_id=holding["user_id"], stock=holding["stock"])

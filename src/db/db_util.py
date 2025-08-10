@@ -1,8 +1,10 @@
+from asyncio.log import logger
 import os
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from supabase import create_client, Client
 from dotenv import load_dotenv
+import bcrypt
 
 load_dotenv()
 
@@ -21,17 +23,27 @@ class SupabaseManager:
 
         self.client: Client = create_client(supabase_url, supabase_key)
 
+    def _hash_password(self, password: str) -> str:
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+        return hashed.decode("utf-8")
+
+    def _verify_password(self, password: str, hashed_password: str) -> bool:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+
     async def create_user(
         self, username: str, email: str, password: str
     ) -> Dict[str, Any]:
         try:
+            hashed_password = self._hash_password(password)
+
             response = (
                 self.client.table("user")
                 .insert(
                     {
                         "username": username,
                         "email": email,
-                        "password": password,
+                        "password": hashed_password,
                         "created_at": datetime.now().isoformat(),
                     }
                 )
@@ -87,6 +99,18 @@ class SupabaseManager:
         except Exception as e:
             raise Exception(f"Error retrieving user by username: {str(e)}")
 
+    async def verify_user_credentials(
+        self, username: str, password: str
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            user = await self.get_user_by_username(username)
+            if user and self._verify_password(password, user["password"]):
+                return user
+            return None
+        except Exception as e:
+            logger.error(f"Error verifying user credentials: {str(e)}")
+            raise Exception("Incorrect username or password")
+
     async def update_user(
         self,
         user_id: int,
@@ -101,7 +125,7 @@ class SupabaseManager:
             if email is not None:
                 update_data["email"] = email
             if password is not None:
-                update_data["password"] = password
+                update_data["password"] = self._hash_password(password)
 
             if not update_data:
                 raise ValueError("No fields to update")

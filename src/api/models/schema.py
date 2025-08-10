@@ -28,6 +28,13 @@ class UserSignInRequest(BaseModel):
     password: str
 
 
+class UserSignInResponse(BaseModel):
+    user: UserResponse
+    access_token: str
+    refresh_token: str
+    token_type: str
+
+
 class UserUpdateRequest(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
@@ -35,7 +42,6 @@ class UserUpdateRequest(BaseModel):
 
 
 class HoldingCreateRequest(BaseModel):
-    user_id: int
     stock: str
 
 
@@ -45,5 +51,4 @@ class HoldingResponse(BaseModel):
 
 
 class HoldingDeleteRequest(BaseModel):
-    user_id: int
     stock: str

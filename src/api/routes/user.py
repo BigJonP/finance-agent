@@ -1,6 +1,17 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 
-from api.models.schema import UserCreateRequest, UserResponse, UserUpdateRequest, UserSignInRequest
+from api.models.schema import (
+    UserCreateRequest,
+    UserResponse,
+    UserUpdateRequest,
+    UserSignInRequest,
+    UserSignInResponse,
+)
+from api.auth.jwt_handler import (
+    get_current_user,
+    create_access_token,
+    create_refresh_token,
+)
 from db.db_util import SupabaseManager
 
 router = APIRouter(prefix="/user", tags=["user"])
@@ -47,29 +58,34 @@ async def create_user(user_data: UserCreateRequest):
         )
 
 
-@router.post("/signin", response_model=UserResponse)
+@router.post("/signin", response_model=UserSignInResponse)
 async def sign_in(signin_data: UserSignInRequest):
     try:
         manager = SupabaseManager()
 
-        # Get user by username
-        user = await manager.get_user_by_username(signin_data.username)
+        user = await manager.verify_user_credentials(
+            signin_data.username, signin_data.password
+        )
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid username or password",
             )
 
-        # Check password (note: this is plain text comparison - should use hashing in production)
-        if user["password"] != signin_data.password:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password"
-            )
+        token_data = {"user_id": user["id"], "username": user["username"]}
+        access_token = create_access_token(data=token_data)
+        refresh_token = create_refresh_token(data=token_data)
 
-        return UserResponse(
-            id=user["id"],
-            username=user["username"],
-            email=user["email"],
-            created_at=user["created_at"],
+        return UserSignInResponse(
+            user=UserResponse(
+                id=user["id"],
+                username=user["username"],
+                email=user["email"],
+                created_at=user["created_at"],
+            ),
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
         )
 
     except HTTPException:
@@ -82,13 +98,15 @@ async def sign_in(signin_data: UserSignInRequest):
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str):
+async def get_user(user_id: str, current_user: dict = Depends(get_current_user)):
     try:
         manager = SupabaseManager()
 
         user = await manager.get_user_by_id(user_id)
         if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
         return UserResponse(
             id=user["id"],
@@ -107,13 +125,25 @@ async def get_user(user_id: str):
 
 
 @router.put("/{user_id}", response_model=UserResponse)
-async def update_user(user_id: str, user_data: UserUpdateRequest):
+async def update_user(
+    user_id: str,
+    user_data: UserUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
     try:
+        if current_user["user_id"] != int(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only update your own profile",
+            )
+
         manager = SupabaseManager()
 
         existing_user = await manager.get_user_by_id(user_id)
         if not existing_user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
         updated_user = await manager.update_user(
             user_id=user_id,
@@ -139,13 +169,21 @@ async def update_user(user_id: str, user_data: UserUpdateRequest):
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_user(user_id: str):
+async def delete_user(user_id: str, current_user: dict = Depends(get_current_user)):
     try:
+        if current_user["user_id"] != int(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only delete your own profile",
+            )
+
         manager = SupabaseManager()
 
         existing_user = await manager.get_user_by_id(user_id)
         if not existing_user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            )
 
         success = await manager.delete_user(user_id)
 
