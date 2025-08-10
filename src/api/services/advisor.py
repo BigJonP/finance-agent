@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from typing import List, Dict, Any
 from openai import AsyncOpenAI
 
@@ -7,6 +8,7 @@ from api.models.schema import AdviceRequest, AdviceResponse
 from db.db_util import get_user_holdings, get_stock_metadata
 from retriever.vector_store import get_vector_store
 from retriever.config import VECTOR_STORE_CONFIG
+from tracking.advisor_tracker import AdvisorTracker
 from api.services.config import (
     SYSTEM_PROMPT,
     ERROR_ADVICE,
@@ -22,6 +24,7 @@ class FinancialAdvisor:
     def __init__(self):
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.vector_store = get_vector_store(VECTOR_STORE_CONFIG)
+        self.tracker = AdvisorTracker()
 
     def _build_enhanced_search_query(self, stock: str, metadata: Dict[str, Any] = None) -> str:
         query_parts = [stock]
@@ -47,36 +50,67 @@ class FinancialAdvisor:
     async def get_user_portfolio_context(
         self, user_id: int
     ) -> tuple[List[Dict[str, Any]], List[str]]:
+        start_time = time.time()
+
         try:
-            holdings = await get_user_holdings(user_id)
-            if not holdings:
-                return [], []
+            with self.tracker.start_run(run_name=f"portfolio-context-{user_id}") as run:
+                self.tracker.log_advisor_config()
 
-            stock_symbols = [holding.get("stock", "") for holding in holdings]
+                holdings = await get_user_holdings(user_id)
+                if not holdings:
+                    self.tracker.log_params({"holdings_found": False})
+                    return [], []
 
-            relevant_documents = []
-            for stock in stock_symbols:
-                try:
-                    stock_metadata = await get_stock_metadata(stock)
-                    enhanced_query = self._build_enhanced_search_query(stock, stock_metadata)
-                except Exception as metadata_error:
-                    logging.info(f"Error getting stock metadata: {metadata_error}")
-                    enhanced_query = self._build_enhanced_search_query(stock, None)
+                stock_symbols = [holding.get("stock", "") for holding in holdings]
 
-                search_results = self.vector_store.search(query=enhanced_query, top_k=RETRIEVER_K)
-                for doc, score in search_results:
-                    if score > 0.9:
-                        relevant_documents.append(doc.page_content)
+                relevant_documents = []
+                for stock in stock_symbols:
+                    try:
+                        stock_metadata = await get_stock_metadata(stock)
+                        enhanced_query = self._build_enhanced_search_query(stock, stock_metadata)
+                    except Exception as metadata_error:
+                        logging.info(f"Error getting stock metadata: {metadata_error}")
+                        enhanced_query = self._build_enhanced_search_query(stock, None)
 
-            return holdings, relevant_documents
+                    search_start_time = time.time()
+                    search_results = self.vector_store.search(
+                        query=enhanced_query, top_k=RETRIEVER_K
+                    )
+                    search_time = time.time() - search_start_time
+
+                    self.tracker.log_vector_store_search(
+                        stock=stock,
+                        enhanced_query=enhanced_query,
+                        search_results=search_results,
+                        search_time=search_time,
+                    )
+
+                    for doc, score in search_results:
+                        if score > 0.9:
+                            relevant_documents.append(doc.page_content)
+
+                processing_time = time.time() - start_time
+
+                self.tracker.log_portfolio_context(
+                    user_id=user_id,
+                    holdings=holdings,
+                    relevant_documents=relevant_documents,
+                    processing_time=processing_time,
+                )
+
+                return holdings, relevant_documents
 
         except Exception as e:
+            processing_time = time.time() - start_time
             logging.info(f"Error getting portfolio context: {str(e)}")
+            self.tracker.log_error(e, "portfolio_context_generation", user_id)
             return [], []
 
     async def generate_financial_advice(
         self, holdings: List[Dict[str, Any]], relevant_documents: List[str]
     ) -> str:
+        start_time = time.time()
+
         try:
             portfolio_summary = self._format_portfolio_summary(holdings)
 
@@ -102,10 +136,36 @@ Please provide comprehensive financial advice based on the above information.
                 temperature=TEMPERATURE,
             )
 
-            return response.choices[0].message.content
+            advice_response = response.choices[0].message.content
+            generation_time = time.time() - start_time
+
+            self.tracker.log_advice_generation(
+                user_prompt=user_prompt,
+                advice_response=advice_response,
+                generation_time=generation_time,
+                token_count=(
+                    response.usage.total_tokens if hasattr(response.usage, "total_tokens") else None
+                ),
+            )
+
+            return advice_response
 
         except Exception as e:
-            return f"I apologize, but I'm currently unable to generate personalized advice. Error: {str(e)}\n\nHowever, I can suggest some general principles: diversify your portfolio, consider your risk tolerance, and regularly review your investment strategy."
+            generation_time = time.time() - start_time
+            error_response = "I apologize, but I'm currently unable to generate personalized advice\n\nHowever, I can suggest some general principles: diversify your portfolio, consider your risk tolerance, and regularly review your investment strategy."
+
+            self.tracker.log_error(e, "advice_generation")
+            self.tracker.log_advice_generation(
+                user_prompt=(
+                    user_prompt
+                    if "user_prompt" in locals()
+                    else "Error occurred before prompt generation"
+                ),
+                advice_response=error_response,
+                generation_time=generation_time,
+            )
+
+            return error_response
 
     def _format_portfolio_summary(self, holdings: List[Dict[str, Any]]) -> str:
         if not holdings:
@@ -142,4 +202,5 @@ async def generate_advice(request: AdviceRequest) -> AdviceResponse:
 
     except Exception as e:
         logging.info(f"Error generating advice: {str(e)}")
+        advisor.tracker.log_error(e, "main_advice_generation", request.user_id)
         return AdviceResponse(advice=ERROR_ADVICE)
