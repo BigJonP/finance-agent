@@ -2,6 +2,8 @@
 /chroma_db/
 /test_chroma_db/
 /data/
+/mlflow_artifacts/
+/mlflow.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

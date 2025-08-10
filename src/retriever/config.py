@@ -23,4 +23,5 @@ VECTOR_STORE_CONFIG = {
         "length_function": len,
         "separators": ["\n\n", "\n", " ", ""],
     },
+    "embedder_config": EMBEDDER_CONFIG,
 }

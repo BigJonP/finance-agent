@@ -23,9 +23,7 @@ class FinancialAdvisor:
         self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.vector_store = get_vector_store(VECTOR_STORE_CONFIG)
 
-    def _build_enhanced_search_query(
-        self, stock: str, metadata: Dict[str, Any] = None
-    ) -> str:
+    def _build_enhanced_search_query(self, stock: str, metadata: Dict[str, Any] = None) -> str:
         query_parts = [stock]
 
         if metadata:
@@ -60,16 +58,12 @@ class FinancialAdvisor:
             for stock in stock_symbols:
                 try:
                     stock_metadata = await get_stock_metadata(stock)
-                    enhanced_query = self._build_enhanced_search_query(
-                        stock, stock_metadata
-                    )
+                    enhanced_query = self._build_enhanced_search_query(stock, stock_metadata)
                 except Exception as metadata_error:
                     logging.info(f"Error getting stock metadata: {metadata_error}")
                     enhanced_query = self._build_enhanced_search_query(stock, None)
 
-                search_results = self.vector_store.search(
-                    query=enhanced_query, top_k=RETRIEVER_K
-                )
+                search_results = self.vector_store.search(query=enhanced_query, top_k=RETRIEVER_K)
                 for doc, score in search_results:
                     if score > 0.9:
                         relevant_documents.append(doc.page_content)
@@ -140,9 +134,7 @@ async def generate_advice(request: AdviceRequest) -> AdviceResponse:
     advisor = get_advisor()
 
     try:
-        holdings, relevant_documents = await advisor.get_user_portfolio_context(
-            request.user_id
-        )
+        holdings, relevant_documents = await advisor.get_user_portfolio_context(request.user_id)
 
         advice = await advisor.generate_financial_advice(holdings, relevant_documents)
 

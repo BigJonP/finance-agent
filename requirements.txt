@@ -13,3 +13,4 @@ openai
 python-jose[cryptography]
 python-multipart
 bcrypt
+mlflow
