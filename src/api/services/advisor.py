@@ -53,7 +53,7 @@ class FinancialAdvisor:
         start_time = time.time()
 
         try:
-            with self.tracker.start_run(run_name=f"portfolio-context-{user_id}") as run:
+            with self.tracker.start_run(run_name=f"portfolio-context-{user_id}"):
                 self.tracker.log_advisor_config()
 
                 holdings = await get_user_holdings(user_id)

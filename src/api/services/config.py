@@ -21,7 +21,7 @@ Format your response with:
 
 MODEL_NAME = "gpt-5-nano"
 
-RETRIEVER_K = 3
+RETRIEVER_K = 2
 
 RELEVANT_DOCUMENTS_TOP_K = 5
 

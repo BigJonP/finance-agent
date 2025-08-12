@@ -6,7 +6,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from retriever.embedder import get_embedder
+from retriever.embedder import get_embedder, get_api_embedder
 from tracking import RetrieverTracker
 
 _vector_store_instance = None
@@ -17,6 +17,7 @@ class AsyncVectorStore:
     def __init__(self, config: dict):
         self.config = config
         self.embeddings = get_embedder()
+        self.api_embeddings = get_api_embedder()
         self.vector_store = Chroma(
             collection_name=config.get("collection_name"),
             embedding_function=self.embeddings,
@@ -141,6 +142,15 @@ class AsyncVectorStore:
             raise
         finally:
             self.tracker.end_run()
+
+    def search_with_embedding(
+        self,
+        embedding: list[float],
+        top_k: Optional[int] = None,
+        filter_dict: Optional[Dict[str, Any]] = None,
+    ) -> List[Tuple[Document, float]]:
+        results = self.vector_store.similarity_search_by_vector(embedding, top_k, filter_dict)
+        return results
 
 
 def get_vector_store(config: dict) -> AsyncVectorStore:

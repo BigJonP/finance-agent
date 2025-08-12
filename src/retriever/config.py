@@ -1,6 +1,6 @@
 EMBEDDER_CONFIG = {
-    "model_name": "Qwen/Qwen3-Embedding-0.6B",
-    "cache_folder": "./models/embedders/Qwen3-Embedding-0.6B",
+    "model_name": "BAAI/bge-base-en-v1.5",
+    "cache_folder": "./models/embedders/bge-base-en-v1.5",
     "model_kwargs": {
         "device": "cuda",
     },
@@ -10,18 +10,21 @@ EMBEDDER_CONFIG = {
     },
 }
 
+
+RECURSIVE_CHARACTER_TEXT_SPLITTER_CONFIG = {
+    "chunk_size": 1000,
+    "chunk_overlap": 200,
+    "length_function": len,
+    "separators": ["\n\n", "\n", " ", ""],
+}
+
 VECTOR_STORE_CONFIG = {
     "collection_name": "documents",
-    "persist_directory": "./chroma_db",
     "chunk_size": 1000,
     "chunk_overlap": 200,
     "batch_size": 64,
     "top_k": 5,
-    "recursive_character_text_splitter": {
-        "chunk_size": 1000,
-        "chunk_overlap": 200,
-        "length_function": len,
-        "separators": ["\n\n", "\n", " ", ""],
-    },
-    "embedder_config": EMBEDDER_CONFIG,
+    "embedder_type": "local",
+    "embedder_kwargs": EMBEDDER_CONFIG,
+    "recursive_character_text_splitter": RECURSIVE_CHARACTER_TEXT_SPLITTER_CONFIG,
 }
