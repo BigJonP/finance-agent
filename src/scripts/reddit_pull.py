@@ -124,46 +124,99 @@ def load_reddit_credentials() -> Dict[str, str]:
     }
 
 
-async def main(subreddit_name: str, hours: int):
-    credentials = load_reddit_credentials()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+def main(subreddit_name: str, hours: int):
+    logger.info(f"=== Starting to process r/{subreddit_name} ===")
 
-    scraper = RedditScraper(
-        client_id=credentials["client_id"],
-        client_secret=credentials["client_secret"],
-        user_agent=credentials["user_agent"],
-        subreddit_name=subreddit_name,
-    )
+    try:
+        credentials = load_reddit_credentials()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    posts = scraper.get_posts_from_last_hours(
-        hours=hours, subreddit_name=subreddit_name
-    )
-
-    vector_store = get_vector_store(VECTOR_STORE_CONFIG)
-    documents = [
-        Document(
-            page_content=post["title"] + "\n" + post["selftext"],
-            metadata={"source": post["permalink"], "timestamp": timestamp},
-        )
-        for post in posts
-    ]
-    await vector_store.add_documents(documents)
-
-    if posts:
-        output_file = scraper.save_posts_to_json(
-            posts,
-            filename=f"{timestamp}.json",
+        scraper = RedditScraper(
+            client_id=credentials["client_id"],
+            client_secret=credentials["client_secret"],
+            user_agent=credentials["user_agent"],
             subreddit_name=subreddit_name,
-            hours=hours,
         )
-        logger.info(f"\nPosts saved to: {output_file}")
-    else:
-        logger.info(f"No posts found in the last {hours} hours.")
+
+        posts = scraper.get_posts_from_last_hours(
+            subreddit_name=subreddit_name, hours=hours
+        )
+
+        logger.info(f"Retrieved {len(posts)} posts from r/{subreddit_name}")
+
+        logger.info("Initializing vector store...")
+        vector_store = get_vector_store(VECTOR_STORE_CONFIG)
+        logger.info("Vector store initialized successfully")
+
+        initial_count = vector_store.get_document_count()
+        logger.info(f"Initial document count in vector store: {initial_count}")
+
+        documents = [
+            Document(
+                page_content=post["title"] + "\n" + (post["selftext"] or ""),
+                metadata={"source": post["permalink"], "timestamp": timestamp},
+            )
+            for post in posts
+            if post["title"] and (post["title"] + (post["selftext"] or "")).strip()
+        ]
+
+        logger.info(f"Created {len(documents)} valid documents from {len(posts)} posts")
+
+        if not documents:
+            logger.warning("No valid documents to add to vector store")
+            return
+
+        logger.info("Adding documents to vector store...")
+        import asyncio
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(vector_store.add_documents(documents))
+            logger.info("Documents added to vector store successfully")
+        finally:
+            loop.close()
+
+        final_count = vector_store.get_document_count()
+        logger.info(f"Final document count in vector store: {final_count}")
+        logger.info(f"Documents added: {final_count - initial_count}")
+
+        if posts:
+            output_file = scraper.save_posts_to_json(
+                posts,
+                filename=f"{timestamp}.json",
+                subreddit_name=subreddit_name,
+                hours=hours,
+            )
+            logger.info(f"Posts saved to: {output_file}")
+        else:
+            logger.info(f"No posts found in the last {hours} hours.")
+
+        logger.info(f"=== Successfully completed processing r/{subreddit_name} ===")
+
+    except Exception as e:
+        logger.error(f"=== Error processing r/{subreddit_name}: {e} ===")
+        import traceback
+
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise
 
 
 if __name__ == "__main__":
-    import asyncio
+    logger.info(f"Starting to process {len(REDDIT_PULL_CONFIG)} subreddits")
 
-    for config in REDDIT_PULL_CONFIG:
-        asyncio.run(main(config["subreddit_name"], config["hours"]))
-        sleep(3)
+    for i, config in enumerate(REDDIT_PULL_CONFIG, 1):
+        logger.info(
+            f"=== Processing subreddit {i}/{len(REDDIT_PULL_CONFIG)}: {config['subreddit_name']} ==="
+        )
+        try:
+            main(config["subreddit_name"], config["hours"])
+            if i < len(REDDIT_PULL_CONFIG):
+                logger.info("Waiting 3 seconds before next subreddit...")
+                sleep(3)
+        except Exception as e:
+            logger.error(f"=== Failed to process r/{config['subreddit_name']}: {e} ===")
+            logger.error("Continuing with next subreddit...")
+            continue
+
+    logger.info("=== Finished processing all subreddits ===")

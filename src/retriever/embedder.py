@@ -6,5 +6,5 @@ from retriever.config import EMBEDDER_CONFIG
 
 
 @cache
-def get_local_embedder() -> HuggingFaceEmbeddings:
+def get_embedder() -> HuggingFaceEmbeddings:
     return HuggingFaceEmbeddings(**EMBEDDER_CONFIG)

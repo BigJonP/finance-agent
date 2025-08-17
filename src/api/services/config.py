@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """You are a professional financial advisor. Analyze the user's current portfolio and provide thoughtful, personalized investment advice. 
+SYSTEM_PROMPT = """You are a professional financial advisor. Analyze the user's current portfolio and provide concise, personalized investment advice based on the market context. 
 
 Consider:
 1. Portfolio diversification
@@ -25,9 +25,7 @@ RETRIEVER_K = 2
 
 RELEVANT_DOCUMENTS_TOP_K = 5
 
-MAX_TOKENS = 1500
-
-TEMPERATURE = 0.7
+MAX_TOKENS = 6000
 
 
 ERROR_ADVICE = """I apologize, but I encountered an error while analyzing your portfolio

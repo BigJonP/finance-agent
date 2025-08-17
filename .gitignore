@@ -3,6 +3,8 @@
 /test_chroma_db/
 /data/
 /mlflow_artifacts/
+/mlflow_tracking/
+/mlruns/
 /mlflow.db
 
 # Byte-compiled / optimized / DLL files

@@ -1,9 +1,9 @@
 import os
 import json
 import tempfile
+import logging
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
-from pathlib import Path
+from typing import Dict, Any, List, Optional
 
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -11,40 +11,72 @@ from langchain_core.documents import Document
 
 from .mlflow_config import get_mlflow_config, MLflowConfig
 
+logger = logging.getLogger(__name__)
+
 
 class RetrieverTracker:
     def __init__(self, config: Optional[MLflowConfig] = None):
         self.config = config or get_mlflow_config()
-        self.client = MlflowClient(tracking_uri=self.config.tracking_uri)
-        self._setup_experiment()
-        self.current_run = None
+        try:
+            self.client = MlflowClient(tracking_uri=self.config.tracking_uri)
+            self._setup_experiment()
+            self.current_run = None
+        except Exception:
+            self.client = None
+            self.current_run = None
 
     def _setup_experiment(self):
-        mlflow.set_tracking_uri(self.config.tracking_uri)
+        try:
+            mlflow.set_tracking_uri(self.config.tracking_uri)
 
-        experiment = self.client.get_experiment_by_name(self.config.experiment_name)
-        if experiment is None:
-            experiment_id = self.client.create_experiment(
-                self.config.experiment_name, artifact_location=self.config.artifact_location
-            )
-        else:
-            experiment_id = experiment.experiment_id
+            experiment = self.client.get_experiment_by_name(self.config.experiment_name)
+            if experiment is None:
+                experiment_id = self.client.create_experiment(
+                    self.config.experiment_name,
+                    artifact_location=self.config.artifact_location,
+                )
+            else:
+                experiment_id = experiment.experiment_id
 
-        mlflow.set_experiment(self.config.experiment_name)
-        return experiment_id
+            mlflow.set_experiment(self.config.experiment_name)
+            return experiment_id
+        except Exception:
+            return None
 
-    def start_run(self, run_name: Optional[str] = None, tags: Optional[Dict[str, str]] = None):
-        if self.current_run is not None:
+    def start_run(
+        self,
+        run_name: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
+        nested: bool = False,
+    ):
+        if self.client is None:
+            return None
+
+        # Don't end existing runs if we're starting a nested run
+        if self.current_run is not None and not nested:
             mlflow.end_run()
 
-        run_name = run_name or self.config.run_name or f"retriever-run-{datetime.now().isoformat()}"
+        run_name = (
+            run_name
+            or self.config.run_name
+            or f"retriever-run-{datetime.now().isoformat()}"
+        )
         tags = tags or {}
         tags.update({"component": "retriever", "timestamp": datetime.now().isoformat()})
 
-        self.current_run = mlflow.start_run(run_name=run_name, tags=tags)
-        return self.current_run
+        try:
+            self.current_run = mlflow.start_run(
+                run_name=run_name, tags=tags, nested=nested
+            )
+            return self.current_run
+        except Exception as e:
+            logger.error(f"Error starting run: {e}")
+            pass
 
     def end_run(self):
+        if self.client is None:
+            return
+
         if self.current_run is not None:
             mlflow.end_run()
             self.current_run = None
@@ -70,8 +102,12 @@ class RetrieverTracker:
             {
                 "embedder_model": config.get("model_name"),
                 "embedder_device": config.get("model_kwargs", {}).get("device"),
-                "embedder_batch_size": config.get("encode_kwargs", {}).get("batch_size"),
-                "embedder_normalize": config.get("encode_kwargs", {}).get("normalize_embeddings"),
+                "embedder_batch_size": config.get("encode_kwargs", {}).get(
+                    "batch_size"
+                ),
+                "embedder_normalize": config.get("encode_kwargs", {}).get(
+                    "normalize_embeddings"
+                ),
             }
         )
 
@@ -92,7 +128,9 @@ class RetrieverTracker:
                 "total_documents": total_documents,
                 "total_chunks": total_chunks,
                 "processing_time_seconds": processing_time,
-                "avg_chunk_size": sum(chunk_sizes) / len(chunk_sizes) if chunk_sizes else 0,
+                "avg_chunk_size": sum(chunk_sizes) / len(chunk_sizes)
+                if chunk_sizes
+                else 0,
                 "min_chunk_size": min(chunk_sizes) if chunk_sizes else 0,
                 "max_chunk_size": max(chunk_sizes) if chunk_sizes else 0,
             }
@@ -102,7 +140,12 @@ class RetrieverTracker:
             mlflow.log_metric(f"chunk_size_{i}", size)
 
     def log_search_metrics(
-        self, query: str, top_k: int, search_time: float, results_count: int, scores: List[float]
+        self,
+        query: str,
+        top_k: int,
+        search_time: float,
+        results_count: int,
+        scores: List[float],
     ):
         mlflow.log_metrics(
             {
@@ -137,7 +180,11 @@ class RetrieverTracker:
         doc_summary = []
         for i, doc in enumerate(sample_docs):
             doc_summary.append(
-                {"index": i, "page_content_length": len(doc.page_content), "metadata": doc.metadata}
+                {
+                    "index": i,
+                    "page_content_length": len(doc.page_content),
+                    "metadata": doc.metadata,
+                }
             )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -150,26 +197,47 @@ class RetrieverTracker:
             mlflow.log_text(content, f"sample_document_{i}.txt")
 
     def log_metrics(self, metrics: Dict[str, float]):
-        mlflow.log_metrics(metrics)
+        if self.client is None:
+            return
+        try:
+            mlflow.log_metrics(metrics)
+        except Exception:
+            pass
 
     def log_params(self, params: Dict[str, Any]):
-        mlflow.log_params(params)
+        if self.client is None:
+            return
+        try:
+            mlflow.log_params(params)
+        except Exception:
+            pass
 
     def log_error(self, error: Exception, context: str = ""):
-        error_info = {
-            "error_type": type(error).__name__,
-            "error_message": str(error),
-            "context": context,
-            "timestamp": datetime.now().isoformat(),
-        }
+        if self.client is None:
+            return
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(error_info, f, indent=2)
-            mlflow.log_artifact(f.name, "error_log.json")
-            os.unlink(f.name)
+        try:
+            error_info = {
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "context": context,
+                "timestamp": datetime.now().isoformat(),
+            }
 
-        mlflow.log_param("error_occurred", True)
-        mlflow.log_param("error_type", error_info["error_type"])
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as f:
+                json.dump(error_info, f, indent=2)
+                mlflow.log_artifact(f.name, "error_log.json")
+                os.unlink(f.name)
+
+            mlflow.log_param("error_occurred", True)
+            mlflow.log_param(
+                f"error_type_{context}_{datetime.now().timestamp()}",
+                error_info["error_type"],
+            )
+        except Exception:
+            pass
 
     def __enter__(self):
         return self

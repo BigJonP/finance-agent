@@ -5,9 +5,9 @@ from dataclasses import dataclass
 
 @dataclass
 class MLflowConfig:
-    tracking_uri: str = "sqlite:///mlflow.db"
+    tracking_uri: str = ""
     experiment_name: str = "finance-agent"
-    artifact_location: str = "./mlflow_artifacts"
+    artifact_location: str = ""
     run_name: Optional[str] = None
 
     def __post_init__(self):

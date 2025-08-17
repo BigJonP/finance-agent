@@ -2,7 +2,7 @@ import os
 import logging
 import time
 from typing import List, Dict, Any
-from openai import AsyncOpenAI
+from openai import OpenAI
 
 from api.models.schema import AdviceRequest, AdviceResponse
 from db.db_util import get_user_holdings, get_stock_metadata
@@ -16,17 +16,25 @@ from api.services.config import (
     RETRIEVER_K,
     RELEVANT_DOCUMENTS_TOP_K,
     MAX_TOKENS,
-    TEMPERATURE,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class FinancialAdvisor:
     def __init__(self):
-        self.openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.vector_store = get_vector_store(VECTOR_STORE_CONFIG)
-        self.tracker = AdvisorTracker()
 
-    def _build_enhanced_search_query(self, stock: str, metadata: Dict[str, Any] = None) -> str:
+        try:
+            self.tracker = AdvisorTracker()
+        except Exception as e:
+            logger.error(f"Error initializing advisor tracker: {e}")
+            pass
+
+    def _build_enhanced_search_query(
+        self, stock: str, metadata: Dict[str, Any] = None
+    ) -> str:
         query_parts = [stock]
 
         if metadata:
@@ -53,44 +61,45 @@ class FinancialAdvisor:
         start_time = time.time()
 
         try:
-            with self.tracker.start_run(run_name=f"portfolio-context-{user_id}"):
-                self.tracker.log_advisor_config()
+            if self.tracker and self.tracker.client:
+                with self.tracker.start_run(run_name=f"portfolio-context-{user_id}"):
+                    self.tracker.log_advisor_config()
+            else:
+                pass
 
-                holdings = await get_user_holdings(user_id)
-                if not holdings:
+            holdings = await get_user_holdings(user_id)
+
+            if not holdings:
+                if self.tracker and self.tracker.client:
                     self.tracker.log_params({"holdings_found": False})
-                    return [], []
+                return [], []
 
-                stock_symbols = [holding.get("stock", "") for holding in holdings]
+            stock_symbols = [holding.get("stock", "") for holding in holdings]
 
-                relevant_documents = []
-                for stock in stock_symbols:
-                    try:
-                        stock_metadata = await get_stock_metadata(stock)
-                        enhanced_query = self._build_enhanced_search_query(stock, stock_metadata)
-                    except Exception as metadata_error:
-                        logging.info(f"Error getting stock metadata: {metadata_error}")
-                        enhanced_query = self._build_enhanced_search_query(stock, None)
-
-                    search_start_time = time.time()
-                    search_results = self.vector_store.search(
-                        query=enhanced_query, top_k=RETRIEVER_K
+            relevant_documents = []
+            for stock in stock_symbols:
+                try:
+                    stock_metadata = await get_stock_metadata(stock)
+                    enhanced_query = self._build_enhanced_search_query(
+                        stock, stock_metadata
                     )
-                    search_time = time.time() - search_start_time
+                except Exception:
+                    enhanced_query = self._build_enhanced_search_query(stock, None)
 
-                    self.tracker.log_vector_store_search(
-                        stock=stock,
-                        enhanced_query=enhanced_query,
-                        search_results=search_results,
-                        search_time=search_time,
-                    )
+                search_start_time = time.time()
 
-                    for doc, score in search_results:
-                        if score > 0.9:
-                            relevant_documents.append(doc.page_content)
+                search_results = self.vector_store.search(
+                    query=enhanced_query, top_k=RETRIEVER_K
+                )
+                time.time() - search_start_time
 
-                processing_time = time.time() - start_time
+                for doc, score in search_results:
+                    if score > 0.9:
+                        relevant_documents.append(doc.page_content)
 
+            processing_time = time.time() - start_time
+
+            if self.tracker and self.tracker.client:
                 self.tracker.log_portfolio_context(
                     user_id=user_id,
                     holdings=holdings,
@@ -98,12 +107,19 @@ class FinancialAdvisor:
                     processing_time=processing_time,
                 )
 
-                return holdings, relevant_documents
+            return holdings, relevant_documents
 
         except Exception as e:
             processing_time = time.time() - start_time
-            logging.info(f"Error getting portfolio context: {str(e)}")
-            self.tracker.log_error(e, "portfolio_context_generation", user_id)
+
+            try:
+                if self.tracker and self.tracker.client:
+                    self.tracker.log_error(e, "portfolio_context_generation", user_id)
+            except Exception as tracker_error:
+                logger.error(
+                    f"Error logging error in portfolio context generation: {tracker_error}"
+                )
+
             return [], []
 
     async def generate_financial_advice(
@@ -116,7 +132,8 @@ class FinancialAdvisor:
 
             market_context = "\n".join(relevant_documents[:RELEVANT_DOCUMENTS_TOP_K])
 
-            user_prompt = f"""
+            user_prompt = f"""{SYSTEM_PROMPT}
+
 Current Portfolio:
 {portfolio_summary}
 
@@ -126,44 +143,50 @@ Relevant Market Information:
 Please provide comprehensive financial advice based on the above information.
 """
 
-            response = await self.openai_client.chat.completions.create(
+            response = self.openai_client.responses.create(
                 model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=MAX_TOKENS,
-                temperature=TEMPERATURE,
+                input=user_prompt,
+                max_output_tokens=MAX_TOKENS,
             )
 
-            advice_response = response.choices[0].message.content
+            advice_response = response.output_text
             generation_time = time.time() - start_time
 
-            self.tracker.log_advice_generation(
-                user_prompt=user_prompt,
-                advice_response=advice_response,
-                generation_time=generation_time,
-                token_count=(
-                    response.usage.total_tokens if hasattr(response.usage, "total_tokens") else None
-                ),
-            )
+            if self.tracker and self.tracker.client:
+                self.tracker.log_advice_generation(
+                    user_prompt=user_prompt,
+                    advice_response=advice_response,
+                    generation_time=generation_time,
+                    token_count=(
+                        response.usage.total_tokens
+                        if hasattr(response.usage, "total_tokens")
+                        else None
+                    ),
+                )
 
             return advice_response
 
         except Exception as e:
             generation_time = time.time() - start_time
+
             error_response = "I apologize, but I'm currently unable to generate personalized advice\n\nHowever, I can suggest some general principles: diversify your portfolio, consider your risk tolerance, and regularly review your investment strategy."
 
-            self.tracker.log_error(e, "advice_generation")
-            self.tracker.log_advice_generation(
-                user_prompt=(
-                    user_prompt
-                    if "user_prompt" in locals()
-                    else "Error occurred before prompt generation"
-                ),
-                advice_response=error_response,
-                generation_time=generation_time,
-            )
+            try:
+                if self.tracker and self.tracker.client:
+                    self.tracker.log_error(e, "advice_generation")
+                    self.tracker.log_advice_generation(
+                        user_prompt=(
+                            user_prompt
+                            if "user_prompt" in locals()
+                            else "Error occurred before prompt generation"
+                        ),
+                        advice_response=error_response,
+                        generation_time=generation_time,
+                    )
+            except Exception as tracker_error:
+                logger.error(
+                    f"Error logging error in advice generation: {tracker_error}"
+                )
 
             return error_response
 
@@ -191,16 +214,20 @@ def get_advisor() -> FinancialAdvisor:
 
 
 async def generate_advice(request: AdviceRequest) -> AdviceResponse:
-    advisor = get_advisor()
-
     try:
-        holdings, relevant_documents = await advisor.get_user_portfolio_context(request.user_id)
-
+        advisor = get_advisor()
+        holdings, relevant_documents = await advisor.get_user_portfolio_context(
+            request.user_id
+        )
         advice = await advisor.generate_financial_advice(holdings, relevant_documents)
-
         return AdviceResponse(advice=advice)
 
     except Exception as e:
-        logging.info(f"Error generating advice: {str(e)}")
-        advisor.tracker.log_error(e, "main_advice_generation", request.user_id)
+        try:
+            advisor.tracker.log_error(e, "main_advice_generation", request.user_id)
+        except Exception as tracker_error:
+            logger.error(
+                f"Error logging error in main advice generation: {tracker_error}"
+            )
+
         return AdviceResponse(advice=ERROR_ADVICE)

@@ -20,6 +20,7 @@ RECURSIVE_CHARACTER_TEXT_SPLITTER_CONFIG = {
 
 VECTOR_STORE_CONFIG = {
     "collection_name": "documents",
+    "persist_directory": "./chroma_db",
     "chunk_size": 1000,
     "chunk_overlap": 200,
     "batch_size": 64,
