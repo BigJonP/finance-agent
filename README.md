@@ -11,9 +11,9 @@
 
 ## 🎥 Demo Video
 
-![Demo Video](https://github.com/BigJonP/finance-agent/assets/demo_video.mp4)
+[![Demo Video](https://img.youtube.com/vi/QMQq0d4y19c/0.jpg)](https://youtu.be/QMQq0d4y19c)
 
-*Watch the demo to see Finance Agent in action!*
+*Click the thumbnail above to watch the demo video on YouTube!*
 
 ## 🚀 What is Finance Agent?
 
