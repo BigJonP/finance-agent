@@ -32,9 +32,7 @@ class FinancialAdvisor:
             logger.error(f"Error initializing advisor tracker: {e}")
             pass
 
-    def _build_enhanced_search_query(
-        self, stock: str, metadata: Dict[str, Any] = None
-    ) -> str:
+    def _build_enhanced_search_query(self, stock: str, metadata: Dict[str, Any] = None) -> str:
         query_parts = [stock]
 
         if metadata:
@@ -45,15 +43,31 @@ class FinancialAdvisor:
                 query_parts.append(metadata["short_name"])
 
             if metadata.get("industries"):
-                query_parts.append(f"industry {metadata['industries']}")
+                industries = metadata["industries"].split(",")
+                for industry in industries:
+                    industry = industry.strip()
+                    if industry:
+                        query_parts.append(industry)
 
             if metadata.get("description"):
-                desc_words = metadata["description"].split()[:25]
+                desc_words = metadata["description"].split()[:30]
                 query_parts.append(" ".join(desc_words))
 
-        query_parts.extend(["financial analysis", "market trends", "investment"])
+        query_parts.extend(
+            [
+                "financial analysis",
+                "market trends",
+                "investment",
+                "stock analysis",
+                "earnings",
+                "revenue",
+                "growth",
+                "performance",
+            ]
+        )
 
-        return " ".join(query_parts)
+        final_query = " ".join(query_parts)
+        return final_query
 
     async def get_user_portfolio_context(
         self, user_id: int
@@ -62,8 +76,13 @@ class FinancialAdvisor:
 
         try:
             if self.tracker and self.tracker.client:
-                with self.tracker.start_run(run_name=f"portfolio-context-{user_id}"):
-                    self.tracker.log_advisor_config()
+                try:
+                    import mlflow
+
+                    with mlflow.start_run(run_name=f"portfolio-context-{user_id}"):
+                        self.tracker.log_advisor_config()
+                except Exception as mlflow_error:
+                    logger.warning(f"MLflow tracking failed: {mlflow_error}")
             else:
                 pass
 
@@ -72,7 +91,11 @@ class FinancialAdvisor:
             if not holdings:
                 if self.tracker and self.tracker.client:
                     self.tracker.log_params({"holdings_found": False})
-                return [], []
+                logger.info(
+                    f"No holdings found for user {user_id}, will use general market context"
+                )
+                relevant_documents = await self._get_general_market_context()
+                return [], relevant_documents
 
             stock_symbols = [holding.get("stock", "") for holding in holdings]
 
@@ -80,22 +103,36 @@ class FinancialAdvisor:
             for stock in stock_symbols:
                 try:
                     stock_metadata = await get_stock_metadata(stock)
-                    enhanced_query = self._build_enhanced_search_query(
-                        stock, stock_metadata
-                    )
+                    enhanced_query = self._build_enhanced_search_query(stock, stock_metadata)
                 except Exception:
                     enhanced_query = self._build_enhanced_search_query(stock, None)
 
                 search_start_time = time.time()
 
-                search_results = self.vector_store.search(
-                    query=enhanced_query, top_k=RETRIEVER_K
+                search_results = self.vector_store.search(query=enhanced_query, top_k=RETRIEVER_K)
+                search_time = time.time() - search_start_time
+
+                logger.info(
+                    f"Search for {stock} took {search_time:.3f}s, found {len(search_results)} results"
                 )
-                time.time() - search_start_time
+
+                for i, (doc, score) in enumerate(search_results):
+                    logger.debug(
+                        f"  {stock} result {i+1}: score={score:.3f}, content_preview={doc.page_content[:100]}..."
+                    )
 
                 for doc, score in search_results:
-                    if score > 0.9:
+                    if score > 0.7:
                         relevant_documents.append(doc.page_content)
+                        logger.debug(f"Added document for {stock} with score {score:.3f}")
+                    else:
+                        logger.debug(
+                            f"Skipped document for {stock} with score {score:.3f} (below threshold)"
+                        )
+
+            if not relevant_documents:
+                logger.info("No stock-specific documents found, using general market context")
+                relevant_documents = await self._get_general_market_context()
 
             processing_time = time.time() - start_time
 
@@ -111,6 +148,7 @@ class FinancialAdvisor:
 
         except Exception as e:
             processing_time = time.time() - start_time
+            logger.error(f"Error in get_user_portfolio_context: {e}")
 
             try:
                 if self.tracker and self.tracker.client:
@@ -120,7 +158,37 @@ class FinancialAdvisor:
                     f"Error logging error in portfolio context generation: {tracker_error}"
                 )
 
-            return [], []
+            relevant_documents = await self._get_general_market_context()
+            return [], relevant_documents
+
+    async def _get_general_market_context(self) -> List[str]:
+        try:
+            general_queries = [
+                "financial analysis market trends investment",
+                "portfolio diversification investment strategy",
+                "market analysis economic outlook",
+                "investment advice financial planning",
+            ]
+
+            relevant_documents = []
+            for query in general_queries:
+                try:
+                    search_results = self.vector_store.search(query=query, top_k=2)
+
+                    for doc, score in search_results:
+                        if score > 0.7:
+                            relevant_documents.append(doc.page_content)
+
+                except Exception as e:
+                    logger.warning(f"Error searching for general context with query '{query}': {e}")
+                    continue
+
+            unique_docs = list(dict.fromkeys(relevant_documents))
+            return unique_docs[:RELEVANT_DOCUMENTS_TOP_K]
+
+        except Exception as e:
+            logger.error(f"Error getting general market context: {e}")
+            return []
 
     async def generate_financial_advice(
         self, holdings: List[Dict[str, Any]], relevant_documents: List[str]
@@ -137,7 +205,7 @@ class FinancialAdvisor:
 Current Portfolio:
 {portfolio_summary}
 
-Relevant Market Information:
+Relevant Reddit Posts:
 {market_context}
 
 Please provide comprehensive financial advice based on the above information.
@@ -184,9 +252,7 @@ Please provide comprehensive financial advice based on the above information.
                         generation_time=generation_time,
                     )
             except Exception as tracker_error:
-                logger.error(
-                    f"Error logging error in advice generation: {tracker_error}"
-                )
+                logger.error(f"Error logging error in advice generation: {tracker_error}")
 
             return error_response
 
@@ -215,19 +281,33 @@ def get_advisor() -> FinancialAdvisor:
 
 async def generate_advice(request: AdviceRequest) -> AdviceResponse:
     try:
+        logger.info(f"Starting advice generation for user {request.user_id}")
+
         advisor = get_advisor()
-        holdings, relevant_documents = await advisor.get_user_portfolio_context(
-            request.user_id
+        holdings, relevant_documents = await advisor.get_user_portfolio_context(request.user_id)
+
+        logger.info(
+            f"Retrieved {len(holdings)} holdings and {len(relevant_documents)} relevant documents for user {request.user_id}"
         )
+
+        if not relevant_documents:
+            logger.warning(
+                f"No relevant documents found for user {request.user_id}, advice may be generic"
+            )
+
         advice = await advisor.generate_financial_advice(holdings, relevant_documents)
+
+        logger.info(f"Successfully generated advice for user {request.user_id}")
         return AdviceResponse(advice=advice)
 
     except Exception as e:
+        logger.error(f"Error generating advice for user {request.user_id}: {e}")
+
         try:
-            advisor.tracker.log_error(e, "main_advice_generation", request.user_id)
+            advisor = get_advisor()
+            if advisor.tracker and advisor.tracker.client:
+                advisor.tracker.log_error(e, "main_advice_generation", request.user_id)
         except Exception as tracker_error:
-            logger.error(
-                f"Error logging error in main advice generation: {tracker_error}"
-            )
+            logger.error(f"Error logging error in main advice generation: {tracker_error}")
 
         return AdviceResponse(advice=ERROR_ADVICE)

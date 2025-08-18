@@ -118,7 +118,6 @@ class AsyncVectorStore:
             top_k,
             filter_dict,
         )
-
         return results
 
     def search_with_embedding(

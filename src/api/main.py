@@ -1,4 +1,6 @@
 import uvicorn
+import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -6,6 +8,19 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from api.routes.generate import router as generate_router
 from api.routes.user import router as users_router
 from api.routes.holding import router as holding_router
+
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("api.log") if log_level == "DEBUG" else logging.NullHandler(),
+    ],
+)
+
+logger = logging.getLogger(__name__)
+logger.info(f"Starting Finance Agent API with log level: {log_level}")
 
 app = FastAPI(title="Finance Agent API", version="1.0.0")
 
@@ -17,9 +32,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.add_middleware(
-    TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0"]
-)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0"])
 
 app.include_router(generate_router)
 app.include_router(users_router)
