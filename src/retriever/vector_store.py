@@ -8,7 +8,6 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from retriever.embedder import get_embedder
-from tracking import RetrieverTracker
 
 logger = logging.getLogger(__name__)
 
@@ -27,73 +26,46 @@ class AsyncVectorStore:
         )
 
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config.get("recursive_character_text_splitter").get(
-                "chunk_size"
-            ),
-            chunk_overlap=config.get("recursive_character_text_splitter").get(
-                "chunk_overlap"
-            ),
-            length_function=config.get("recursive_character_text_splitter").get(
-                "length_function"
-            ),
-            separators=config.get("recursive_character_text_splitter").get(
-                "separators"
-            ),
+            chunk_size=config.get("recursive_character_text_splitter").get("chunk_size"),
+            chunk_overlap=config.get("recursive_character_text_splitter").get("chunk_overlap"),
+            length_function=config.get("recursive_character_text_splitter").get("length_function"),
+            separators=config.get("recursive_character_text_splitter").get("separators"),
         )
 
-        self.tracker = RetrieverTracker()
         self._log_configs()
 
     def _log_configs(self):
         try:
-            self.tracker.start_run(run_name="vector-store-init")
-            self.tracker.log_vector_store_config(self.config)
-            self.tracker.log_embedder_config(self.config.get("embedder_config", {}))
-            self.tracker.end_run()
+            logger.info(f"Vector store initialized with config: {self.config}")
+            logger.info(f"Embedder config: {self.config.get('embedder_config', {})}")
         except Exception as e:
             logger.warning(f"Failed to log configs to MLflow: {e}")
 
     async def add_documents(self, documents: List[Document]) -> None:
         initial_count = self.get_document_count()
-        start_time = time.time()
 
         try:
-            self.tracker.start_run(run_name="document-processing")
-            self.tracker.log_sample_documents(documents)
-
             logger.info(
                 f"Starting to add {len(documents)} documents. Initial count: {initial_count}"
             )
             await self.add_documents_stream(documents)
 
-            processing_time = time.time() - start_time
-            estimated_chunks = len(documents) * 2
-            chunk_sizes = [len(doc.page_content) for doc in documents]
             final_count = self.get_document_count()
 
             logger.info(
                 f"Document processing completed. Final count: {final_count}, Added: {final_count - initial_count}"
             )
 
-            self.tracker.log_document_processing_metrics(
-                total_documents=len(documents),
-                total_chunks=estimated_chunks,
-                processing_time=processing_time,
-                chunk_sizes=chunk_sizes,
-            )
         except Exception as e:
-            self.tracker.log_error(e, "document_processing")
             logger.error(f"Error during document processing: {e}")
             raise
         finally:
-            self.tracker.end_run()
+            pass
 
     async def add_documents_stream(self, documents: List[Document]) -> None:
         chunk_queue = asyncio.Queue(maxsize=100)
         consumer_task = asyncio.create_task(self._chunk_consumer(chunk_queue))
-        producer_task = asyncio.create_task(
-            self._chunk_producer(documents, chunk_queue)
-        )
+        producer_task = asyncio.create_task(self._chunk_producer(documents, chunk_queue))
 
         await asyncio.gather(producer_task, consumer_task)
 
@@ -121,9 +93,7 @@ class AsyncVectorStore:
         await loop.run_in_executor(None, self.vector_store.add_documents, documents)
         logger.info(f"Successfully added batch of {len(documents)} documents")
 
-    async def _chunk_producer(
-        self, documents: List[Document], chunk_queue: asyncio.Queue
-    ) -> None:
+    async def _chunk_producer(self, documents: List[Document], chunk_queue: asyncio.Queue) -> None:
         total_chunks = 0
         for document in documents:
             chunks = await self.text_splitter.atransform_documents([document])
@@ -140,37 +110,16 @@ class AsyncVectorStore:
         top_k: Optional[int] = None,
         filter_dict: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[Document, float]]:
-        start_time = time.time()
+        if top_k is None:
+            top_k = self.config.get("top_k")
 
-        try:
-            self.tracker.start_run(run_name="search-query", nested=True)
+        results = self.vector_store.similarity_search_with_score(
+            query,
+            top_k,
+            filter_dict,
+        )
 
-            if top_k is None:
-                top_k = self.config.get("top_k")
-
-            results = self.vector_store.similarity_search_with_score(
-                query,
-                top_k,
-                filter_dict,
-            )
-            search_time = time.time() - start_time
-
-            scores = [score for _, score in results]
-            self.tracker.log_search_metrics(
-                query=query,
-                top_k=top_k,
-                search_time=search_time,
-                results_count=len(results),
-                scores=scores,
-            )
-
-            return results
-
-        except Exception as e:
-            self.tracker.log_error(e, "search_query")
-            raise
-        finally:
-            self.tracker.end_run()
+        return results
 
     def search_with_embedding(
         self,
@@ -178,9 +127,7 @@ class AsyncVectorStore:
         top_k: Optional[int] = None,
         filter_dict: Optional[Dict[str, Any]] = None,
     ) -> List[Tuple[Document, float]]:
-        results = self.vector_store.similarity_search_by_vector(
-            embedding, top_k, filter_dict
-        )
+        results = self.vector_store.similarity_search_by_vector(embedding, top_k, filter_dict)
         return results
 
     def get_document_count(self) -> int:

@@ -2,12 +2,14 @@ import os
 from typing import Optional
 from dataclasses import dataclass
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 @dataclass
 class MLflowConfig:
-    tracking_uri: str = ""
+    tracking_uri: str = PROJECT_ROOT + "/mlflow_tracking"
     experiment_name: str = "finance-agent"
-    artifact_location: str = ""
+    artifact_location: str = PROJECT_ROOT + "/mlflow_artifacts"
     run_name: Optional[str] = None
 
     def __post_init__(self):
