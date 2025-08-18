@@ -11,7 +11,7 @@
 
 ## 🎥 Demo Video
 
-https://github.com/BigJonP/finance-agent/assets/demo_video.mp4
+![Demo Video](https://github.com/BigJonP/finance-agent/assets/demo_video.mp4)
 
 *Watch the demo to see Finance Agent in action!*
 
