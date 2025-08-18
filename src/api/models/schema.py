@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List, Dict
 
 
 class AdviceRequest(BaseModel):
@@ -8,6 +8,7 @@ class AdviceRequest(BaseModel):
 
 class AdviceResponse(BaseModel):
     advice: str
+    relevant_documents: Optional[List[Dict[str, str]]] = None
 
 
 class UserCreateRequest(BaseModel):

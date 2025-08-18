@@ -152,11 +152,10 @@ mkdir -p "$PROJECT_ROOT/mlflow_artifacts"
 mkdir -p "$PROJECT_ROOT/chroma_db"
 print_status "Directories created"
 
-print_info "Setting debug logging configuration..."
-export LOG_LEVEL="DEBUG"
+print_info "Setting info logging configuration..."
+export LOG_LEVEL="INFO"
 export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-print_status "Debug logging enabled (LOG_LEVEL=DEBUG)"
 
 echo ""
 echo -e "${BLUE}🚀 Starting Finance Agent API...${NC}"
@@ -164,10 +163,10 @@ echo -e "${BLUE}================================${NC}"
 print_info "API will be available at: http://$API_HOST:$API_PORT"
 print_info "API Documentation: http://$API_HOST:$API_PORT/docs"
 print_info "ReDoc Documentation: http://$API_HOST:$API_PORT/redoc"
-print_info "Log Level: DEBUG"
+print_info "Log Level: INFO"
 echo ""
 
 cd "$PROJECT_ROOT/src"
 
-print_status "Starting API server with debug logging..."
-"$PYTHON_PATH" -m uvicorn api.main:app --host "$API_HOST" --port "$API_PORT" --reload --log-level debug
+print_status "Starting API server with info logging..."
+"$PYTHON_PATH" -m uvicorn api.main:app --host "$API_HOST" --port "$API_PORT" --reload --log-level info

@@ -8,6 +8,7 @@ from api.models.schema import AdviceRequest, AdviceResponse
 from db.db_util import get_user_holdings, get_stock_metadata
 from retriever.vector_store import get_vector_store
 from retriever.config import VECTOR_STORE_CONFIG
+from langchain_core.documents import Document
 from tracking.advisor_tracker import AdvisorTracker
 from api.services.config import (
     SYSTEM_PROMPT,
@@ -71,7 +72,7 @@ class FinancialAdvisor:
 
     async def get_user_portfolio_context(
         self, user_id: int
-    ) -> tuple[List[Dict[str, Any]], List[str]]:
+    ) -> tuple[List[Dict[str, Any]], List[tuple[Document, float]]]:
         start_time = time.time()
 
         try:
@@ -116,19 +117,9 @@ class FinancialAdvisor:
                     f"Search for {stock} took {search_time:.3f}s, found {len(search_results)} results"
                 )
 
-                for i, (doc, score) in enumerate(search_results):
-                    logger.debug(
-                        f"  {stock} result {i+1}: score={score:.3f}, content_preview={doc.page_content[:100]}..."
-                    )
-
                 for doc, score in search_results:
                     if score > 0.7:
-                        relevant_documents.append(doc.page_content)
-                        logger.debug(f"Added document for {stock} with score {score:.3f}")
-                    else:
-                        logger.debug(
-                            f"Skipped document for {stock} with score {score:.3f} (below threshold)"
-                        )
+                        relevant_documents.append((doc, score))
 
             if not relevant_documents:
                 logger.info("No stock-specific documents found, using general market context")
@@ -161,7 +152,7 @@ class FinancialAdvisor:
             relevant_documents = await self._get_general_market_context()
             return [], relevant_documents
 
-    async def _get_general_market_context(self) -> List[str]:
+    async def _get_general_market_context(self) -> List[tuple[Document, float]]:
         try:
             general_queries = [
                 "financial analysis market trends investment",
@@ -177,13 +168,19 @@ class FinancialAdvisor:
 
                     for doc, score in search_results:
                         if score > 0.7:
-                            relevant_documents.append(doc.page_content)
+                            relevant_documents.append((doc, score))
 
                 except Exception as e:
                     logger.warning(f"Error searching for general context with query '{query}': {e}")
                     continue
 
-            unique_docs = list(dict.fromkeys(relevant_documents))
+            seen_contents = set()
+            unique_docs = []
+            for doc, score in relevant_documents:
+                if doc.page_content not in seen_contents:
+                    seen_contents.add(doc.page_content)
+                    unique_docs.append((doc, score))
+
             return unique_docs[:RELEVANT_DOCUMENTS_TOP_K]
 
         except Exception as e:
@@ -191,14 +188,33 @@ class FinancialAdvisor:
             return []
 
     async def generate_financial_advice(
-        self, holdings: List[Dict[str, Any]], relevant_documents: List[str]
-    ) -> str:
+        self, holdings: List[Dict[str, Any]], relevant_documents: List[tuple[Document, float]]
+    ) -> tuple[str, List[Dict[str, str]]]:
         start_time = time.time()
 
         try:
             portfolio_summary = self._format_portfolio_summary(holdings)
 
-            market_context = "\n".join(relevant_documents[:RELEVANT_DOCUMENTS_TOP_K])
+            market_context_parts = []
+            relevant_docs_with_urls = []
+
+            for doc, score in relevant_documents[:RELEVANT_DOCUMENTS_TOP_K]:
+                market_context_parts.append(doc.page_content)
+
+                url = doc.metadata.get("source", "No URL available")
+                relevant_docs_with_urls.append(
+                    {
+                        "content": (
+                            doc.page_content[:200] + "..."
+                            if len(doc.page_content) > 200
+                            else doc.page_content
+                        ),
+                        "url": url,
+                        "score": f"{score:.3f}",
+                    }
+                )
+
+            market_context = "\n".join(market_context_parts)
 
             user_prompt = f"""{SYSTEM_PROMPT}
 
@@ -232,7 +248,7 @@ Please provide comprehensive financial advice based on the above information.
                     ),
                 )
 
-            return advice_response
+            return advice_response, relevant_docs_with_urls
 
         except Exception as e:
             generation_time = time.time() - start_time
@@ -254,7 +270,7 @@ Please provide comprehensive financial advice based on the above information.
             except Exception as tracker_error:
                 logger.error(f"Error logging error in advice generation: {tracker_error}")
 
-            return error_response
+            return error_response, []
 
     def _format_portfolio_summary(self, holdings: List[Dict[str, Any]]) -> str:
         if not holdings:
@@ -295,10 +311,12 @@ async def generate_advice(request: AdviceRequest) -> AdviceResponse:
                 f"No relevant documents found for user {request.user_id}, advice may be generic"
             )
 
-        advice = await advisor.generate_financial_advice(holdings, relevant_documents)
+        advice, relevant_docs = await advisor.generate_financial_advice(
+            holdings, relevant_documents
+        )
 
         logger.info(f"Successfully generated advice for user {request.user_id}")
-        return AdviceResponse(advice=advice)
+        return AdviceResponse(advice=advice, relevant_documents=relevant_docs)
 
     except Exception as e:
         logger.error(f"Error generating advice for user {request.user_id}: {e}")
@@ -310,4 +328,4 @@ async def generate_advice(request: AdviceRequest) -> AdviceResponse:
         except Exception as tracker_error:
             logger.error(f"Error logging error in main advice generation: {tracker_error}")
 
-        return AdviceResponse(advice=ERROR_ADVICE)
+        return AdviceResponse(advice=ERROR_ADVICE, relevant_documents=[])

@@ -15,7 +15,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("api.log") if log_level == "DEBUG" else logging.NullHandler(),
+        logging.FileHandler("api.log") if log_level == log_level else logging.NullHandler(),
     ],
 )
 
