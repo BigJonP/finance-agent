@@ -10,8 +10,6 @@
 **Frontend UI**: A modern Next.js TypeScript application is available at [finance-agent-ui](https://github.com/BigJonP/finance-agent-ui) for the complete user experience.
 
 ## 🎥 Demo Video
-![Demo Video](https://github.com/user-attachments/assets/1533a6aa-014a-4f69-8bd7-c1c08720d071)
-
 
 [![Demo Video](https://img.youtube.com/vi/QMQq0d4y19c/0.jpg)](https://youtu.be/QMQq0d4y19c)
 
