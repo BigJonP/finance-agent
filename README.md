@@ -65,7 +65,7 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/finance-agent.git
+   git clone https://github.com/BigJonP/finance-agent.git
    cd finance-agent
    ```
 
@@ -142,6 +142,6 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 
 ## Support & Contact
 
-- **GitHub Issues**: [Report bugs or request features](https://github.com/yourusername/finance-agent/issues)
-- **Discussions**: [Join the community](https://github.com/yourusername/finance-agent/discussions)
+- **GitHub Issues**: [Report bugs or request features](https://github.com/BigJonP/finance-agent/issues)
+- **Discussions**: [Join the community](https://github.com/BigJonP/finance-agent/discussions)
 - **Author**: [Jonathan Paserman](https://github.com/BigJonP)
